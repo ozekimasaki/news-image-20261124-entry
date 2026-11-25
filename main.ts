@@ -40,6 +40,8 @@ interface PngHeader {
   height: number;
   bitDepth: number;
   colorType: number;
+  chunks: number;
+  idatBytes: number;
 }
 
 // Walk every chunk, checking its CRC, and collect the IHDR facts.
@@ -50,6 +52,8 @@ function validatePng(bytes: Buffer): PngHeader {
   let offset = 8;
   let header: PngHeader | null = null;
   let sawIdat = false;
+  let chunks = 0;
+  let idatBytes = 0;
   let lastType = '';
   while (offset + 8 <= bytes.length) {
     const length = bytes.readUInt32BE(offset);
@@ -67,6 +71,7 @@ function validatePng(bytes: Buffer): PngHeader {
     if (stored !== computed) {
       throw new Error(`chunk ${type} has a bad CRC-32`);
     }
+    chunks += 1;
     if (type === 'IHDR') {
       if (length !== 13) throw new Error('IHDR must be 13 bytes');
       header = {
@@ -74,9 +79,12 @@ function validatePng(bytes: Buffer): PngHeader {
         height: bytes.readUInt32BE(dataStart + 4),
         bitDepth: bytes[dataStart + 8],
         colorType: bytes[dataStart + 9],
+        chunks: 0,
+        idatBytes: 0,
       };
     } else if (type === 'IDAT') {
       sawIdat = true;
+      idatBytes += length;
     } else if (type === 'IEND') {
       if (crcEnd !== bytes.length) {
         throw new Error('bytes follow the IEND chunk');
@@ -89,6 +97,8 @@ function validatePng(bytes: Buffer): PngHeader {
   if (lastType !== 'IEND') throw new Error('no IEND chunk at the end of the file');
   if (!header) throw new Error('no IHDR chunk found');
   if (!sawIdat) throw new Error('no IDAT chunk found');
+  header.chunks = chunks;
+  header.idatBytes = idatBytes;
   return header;
 }
 
@@ -119,4 +129,5 @@ if (createHash('sha256').update(written).digest('hex') !== digest) {
   throw new Error('written entry.png differs from the validated source');
 }
 console.log(`entry.png OK: ${header.width}x${header.height}, ${png.length} bytes, sha256=${digest}`);
+console.log(`structure: ${header.chunks} chunks, ${header.idatBytes} IDAT bytes, all CRC-32 verified`);
 console.log(`wrote ${outPath} (verified identical)`);
